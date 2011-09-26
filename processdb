@@ -1,0 +1,111 @@
+#!/usr/bin/env ruby
+
+require 'sqlite3'
+
+def dbInit()
+  # Try to setup up the sqlite package
+  if File::exists?("weather.db")
+    db = SQLite3::Database.new("weather.db")
+  else
+    db = SQLite3::Database.new("weather.db")
+    # timestamp is the Unix date i.e. seconds since 1970-01-01 00:00:00 UTC
+    db.execute("CREATE TABLE data (timestamp INTEGER PRIMARY KEY, \
+                                abspressure FLOAT, \
+                                windspeed FLOAT, \
+                                winddir INTEGER, \
+                                rainfall FLOAT, \
+                                indoortemp FLOAT, \
+                                outdoortemp FLOAT, \
+                                indoorhumid INTEGER, \
+                                outdoorhumid INTEGER)")
+  end
+  return db
+end
+
+def addDbEntry(db, tstamp, pres, wspeed, wdir, rain, itemp, otemp, ihumid, ohumid)
+  # See if this timestamp already present, if so, then check if data is
+  # identical, give warning about this. If not present just add the entry.
+  timestamp = db.execute("SELECT timestamp FROM data WHERE timestamp=" + tstamp.to_s)
+  p timestamp
+  if timestamp.empty?
+    db.execute("INSERT INTO data VALUES (#{tstamp}, #{pres}, #{wspeed}, #{wdir},
+               #{rain}, #{itemp}, #{otemp}, #{ihumid}, #{ohumid})")
+  else
+    db.results_as_hash = true
+    retVal = db.execute("SELECT * FROM data WHERE timestamp=#{tstamp}")
+    values = retVal[0] 
+    if values["abspressure"].to_s != pres
+      puts "Diff abspressure #{values["abspressure"]} #{pres}"
+    end
+    if values["windspeed"].to_s != wspeed
+      puts "Diff windspeed #{values["windspeed"]} #{wspeed}"
+    end
+    if values["winddir"] != wdir
+      puts "Diff winddir #{values["winddir"]} #{wdir}"
+    end
+    if values["rainfall"].to_s != rain
+      puts "Diff rainfall #{values["rainfall"]} #{rain}"
+    end
+    if values["indoortemp"].to_s != itemp
+      puts "Diff indoortemp #{values["indoortemp"]} #{itemp}"
+    end
+    if values["outdoortemp"].to_s != otemp
+      puts "Diff outdoortemp #{values["outdoortemp"]} #{otemp}"
+    end
+    if values["indoorhumid"] != ihumid
+      puts "Diff indoorhumid #{values["indoorhumid"]} #{ihumid}"
+    end
+    if values["outdoorhumid"] != ohumid
+      puts "Diff outdoorhumid #{values["outdoorhumid"]} #{ohumid}"
+    end
+  end
+end
+    
+def timestamp2unix(t)
+  return t - ((70 * 365 + 17) * 86400)
+end
+
+def unix2timestamp(t)
+  return t + ((70 * 365 + 17) * 86400)
+end
+
+def seconds2date(s)
+  return %x{date -d @#{s.to_s}}
+end
+    
+def readWeatherFile(db, binfile)
+  fp = open(binfile, "rb")
+  count = 0
+  
+  while !fp.eof()
+    type = fp.read(4).unpack("L")
+#    p type
+    if type[0] == 1
+      count = count + 1
+      timestamp, pressure, windspeed, winddir, rain, intemp, outtemp, inhumidity, outhumidity = fp.read(32).unpack("LffLfffSS")
+#      p timestamp, pressure, windspeed, winddir, rain, intemp, outtemp, inhumidity, outhumidity
+      # Change timestamp to be unix standard
+      timestamp = timestamp2unix(timestamp)
+#      printf("%s %.1f %.1f %d %.1f %.1f %.1f %d %d\n", seconds2date(timestamp), pressure, windspeed, winddir, rain, intemp, outtemp, inhumidity, outhumidity)
+      addDbEntry(db, timestamp, "%.1f" % pressure, "%.1f" % windspeed, winddir, "%.1f" % rain,
+                  "%.1f" % intemp, "%.1f" % outtemp, inhumidity, outhumidity)
+    else
+      u1, u2, u3, rows, timestamp1, timestamp2 = fp.read(24).unpack("LfLLLL")
+      ts1 = timestamp2unix(timestamp1)
+      ts2 = timestamp2unix(timestamp2)
+      p count, rows, seconds2date(ts1), seconds2date(ts2), u1, u2, u3
+      break
+    end
+  end
+    
+  fp.close()
+end
+  
+db = dbInit()
+
+readWeatherFile(db, "history.dat")
+
+rows = db.execute( "select * from data" )
+p rows[0]
+
+#contents = open(path_to_binary_file, "rb") {|io| io.read }
