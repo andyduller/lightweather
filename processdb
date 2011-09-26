@@ -59,42 +59,44 @@ def addDbEntry(db, tstamp, pres, wspeed, wdir, rain, itemp, otemp, ihumid, ohumi
     if values["outdoorhumid"] != ohumid
       puts "Diff outdoorhumid #{values["outdoorhumid"]} #{ohumid}"
     end
-
   end
 end
 
-#proc showDbRanges {} {
-#  set start 0
-#  set next 0
-#  set count 0
-#  db eval {SELECT * FROM data ORDER BY timestamp} values {
-#    incr count
-#    set ts $values(timestamp)
-#    if {$start == 0} {
-#      set start $ts
-#      set next $ts
-#      }
-#      if {$ts == $next} {
-#      # Still part of this block
-#      incr next 3600
-#        } else {
-#      puts "[seconds2date $start] -> [seconds2date [expr $next - 3600]]"
-#      puts "Gap: [expr ($ts - $next)/3600]"
-#      set start $ts
-#      set next [expr $ts + 3600]
-#        }
-#      }
-#  # Output the last range
-#  puts "[seconds2date $start] -> [seconds2date [expr $next - 3600]]"
-#  puts "$count timestamps"
-#    }
-#
+def showDbRanges(db)
+  start = 0
+  nextts = 0
+  count = 0
+  db.results_as_hash = true
+  rows = db.execute("SELECT * FROM data ORDER BY timestamp")
+  rows.each do |values|
+    count = count + 1
+    ts = values["timestamp"]
+    if start == 0
+      start = ts
+      nextts = ts
+    end
+    if ts == nextts
+      # Still part of this block
+      nextts = nextts + 3600
+    else
+      puts "#{seconds2date(start)} -> #{seconds2date(nextts - 3600)}"
+      puts "Gap: #{(ts - nextts)/3600}"
+      start = ts
+      nextts = ts + 3600
+    end
+  end
+
+  # Output the last range
+  puts "#{seconds2date(start)} -> #{seconds2date(nextts - 3600)}"
+  puts "#{count} timestamps"
+ end
+
+
 ## outdoortemp = 81.1 means no connection
 ## windspeed = 51.0 means no connection
 ## outdoorhumid = 110 means no connection
 #    proc showDb {type} {
 #  set start 0
-#  set next 0
 #  set count 0
 #      if {$type == "rainfall"} {
 #    set previous 0
@@ -124,7 +126,7 @@ def unix2timestamp(t)
 end
 
 def seconds2date(s)
-  return %x{date -d @#{s.to_s}}
+  %x{date -d @#{s.to_s}}.chomp!
 end
     
 def readWeatherFile(db, binfile)
@@ -168,10 +170,10 @@ opts = OptionParser.new do |opts|
   end
   opts.on("-s", "--showdb [DATAFILE]") do |datafile|
     db = dbInit
-    if datafile.empty?
+    if datafile.nil?
       showDbRanges(db)
     else
-      showDb(filename)
+      showDb(datafile)
     end
   end
   opts.on_tail("-h", "--help") do
