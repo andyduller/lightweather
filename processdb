@@ -92,31 +92,37 @@ def showDbRanges(db)
  end
 
 
-## outdoortemp = 81.1 means no connection
-## windspeed = 51.0 means no connection
-## outdoorhumid = 110 means no connection
-#    proc showDb {type} {
-#  set start 0
-#  set count 0
-#      if {$type == "rainfall"} {
-#    set previous 0
-#          db eval {SELECT * FROM data ORDER BY timestamp} values {
-#      set current $values(rainfall)
-#      set diff [expr abs($current - $previous)]
-#            if {$diff > 300} {
-#        set diff 0
-#              }
-#      set previous $current
-#      puts "$values(timestamp) [format %.1f $diff] $values(rainfall) [seconds2da
-#te $values(timestamp)]"
-#            }
-#          } else {
-#            db eval {SELECT * FROM data ORDER BY timestamp} values {
-#      puts "$values(timestamp) $values($type) [seconds2date $values(timestamp)]"
-#            }
-#          }
-#        }
-#    
+# outdoortemp = 81.1 means no connection
+# windspeed = 51.0 means no connection
+# outdoorhumid = 110 means no connection
+def showDb(db, type)
+  start = 0
+  validTypes = ["abspressure", "windspeed", "winddir", "rainfall", "indoortemp", "outdoortemp", "indoorhumid", "outdoorhumid"]
+  unless validTypes.any? { |x| x == type }
+    puts "#{type} is not a valid datatype. Expected one of #{validTypes.join(", ")}"
+    exit(1)
+  end
+  count = 0
+  db.results_as_hash = true
+  rows = db.execute("SELECT * FROM data ORDER BY timestamp")
+  if type == "rainfall"
+    previous = 0
+    rows.each do |values|
+      current = values["rainfall"]
+      diff = (current - previous).abs
+      if diff > 300
+        diff = 0
+      end
+      previous = current
+      puts "#{values["timestamp"]} #{"%.1f" % diff} #{values["rainfall"]} #{seconds2date(values["timestamp"])}"
+    end
+  else
+    rows.each do |values|
+      puts "#{values["timestamp"]} #{values[type.to_s]} #{seconds2date(values["timestamp"])}"
+    end
+  end
+end
+    
 def timestamp2unix(t)
   return t - ((70 * 365 + 17) * 86400)
 end
@@ -168,12 +174,12 @@ opts = OptionParser.new do |opts|
     writeWeatherFile(db, datafile)
     showDbRanges(db)
   end
-  opts.on("-s", "--showdb [DATAFILE]") do |datafile|
+  opts.on("-s", "--showdb [DATATYPE]") do |datatype|
     db = dbInit
-    if datafile.nil?
+    if datatype.nil?
       showDbRanges(db)
     else
-      showDb(datafile)
+      showDb(db, datatype)
     end
   end
   opts.on_tail("-h", "--help") do
