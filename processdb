@@ -163,6 +163,33 @@ def readWeatherFile(db, binfile)
   fp.close()
 end
 
+class Array
+  alias :prepend :unshift
+end
+
+def writeWeatherFile(db, binfile)
+  fp = open(binfile, "wb")
+  timestamp1 = 0
+  timestamp2 = 0
+  
+  rows = db.execute("SELECT * FROM data")
+  rows.each_with_index do |row, idx|
+    if idx == 0
+      timestamp1 = row[0]
+    end
+    timestamp2 = row[0]
+    row[0] = unix2timestamp(row[0])
+    # Add the type (always 1 for normal data) as the first element of the row
+    row.prepend(1)
+    fp.write(row.pack("LLffLfffSS"))
+  end
+
+  ts1 = unix2timestamp(timestamp1)
+  ts2 = unix2timestamp(timestamp2)
+  fp.write([558065031, 0, 5.698, 0, rows.length, ts1, ts2].pack("LLfLLLL"))
+  fp.close
+end
+
 opts = OptionParser.new do |opts|
   opts.on("-a", "--add2db DATAFILE") do |datafile|
     db = dbInit
