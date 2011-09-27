@@ -18,44 +18,49 @@ def dbInit()
                                 indoortemp FLOAT, \
                                 outdoortemp FLOAT, \
                                 indoorhumid INTEGER, \
-                                outdoorhumid INTEGER)")
+                                outdoorhumid INTEGER, \
+                                origts INTEGER, \
+                                isedited INTEGER)")
   end
   return db
 end
 
-def addDbEntry(db, tstamp, pres, wspeed, wdir, rain, itemp, otemp, ihumid, ohumid)
+def addDbEntry(db, tstamp, pres, wspeed, wdir, rain, itemp, otemp,
+               ihumid, ohumid)
   # See if this timestamp already present, if so, then check if data is
   # identical, give warning about this. If not present just add the entry.
-  timestamp = db.execute("SELECT timestamp FROM data WHERE timestamp=" + tstamp.to_s)
+  timestamp = db.execute("SELECT origts FROM data WHERE origts=" +
+                         tstamp.to_s)
   if timestamp.empty?
-    db.execute("INSERT INTO data VALUES (#{tstamp}, #{pres}, #{wspeed}, #{wdir},
-               #{rain}, #{itemp}, #{otemp}, #{ihumid}, #{ohumid})")
+    db.execute("INSERT INTO data VALUES (#{tstamp}, #{pres}, #{wspeed},
+               #{wdir}, #{rain}, #{itemp}, #{otemp},
+               #{ihumid}, #{ohumid}, #{tstamp}, 0)")
   else
     db.results_as_hash = true
-    retVal = db.execute("SELECT * FROM data WHERE timestamp=#{tstamp}")
+    retVal = db.execute("SELECT * FROM data WHERE origts=#{tstamp}")
     values = retVal[0] 
-    if values["abspressure"].to_s != pres
+    if values["abspressure"] != pres.to_f
       puts "Diff abspressure #{values["abspressure"]} #{pres}"
     end
-    if values["windspeed"].to_s != wspeed
+    if values["windspeed"] != wspeed.to_f
       puts "Diff windspeed #{values["windspeed"]} #{wspeed}"
     end
-    if values["winddir"] != wdir
+    if values["winddir"] != wdir.to_i
       puts "Diff winddir #{values["winddir"]} #{wdir}"
     end
-    if values["rainfall"].to_s != rain
-      puts "Diff rainfall #{values["rainfall"]} #{rain}"
+    if values["rainfall"] != rain.to_f
+      puts "Diff rainfall #{values["rainfall"]} #{rain.to_f}"
     end
-    if values["indoortemp"].to_s != itemp
+    if values["indoortemp"] != itemp.to_f
       puts "Diff indoortemp #{values["indoortemp"]} #{itemp}"
     end
-    if values["outdoortemp"].to_s != otemp
+    if values["outdoortemp"] != otemp.to_f
       puts "Diff outdoortemp #{values["outdoortemp"]} #{otemp}"
     end
-    if values["indoorhumid"] != ihumid
+    if values["indoorhumid"] != ihumid.to_i
       puts "Diff indoorhumid #{values["indoorhumid"]} #{ihumid}"
     end
-    if values["outdoorhumid"] != ohumid
+    if values["outdoorhumid"] != ohumid.to_i
       puts "Diff outdoorhumid #{values["outdoorhumid"]} #{ohumid}"
     end
   end
@@ -88,17 +93,18 @@ def showDbRanges(db)
   # Output the last range
   puts "#{seconds2date(start)} -> #{seconds2date(nextts - 3600)}"
   puts "#{count} timestamps"
- end
-
+end
 
 # outdoortemp = 81.1 means no connection
 # windspeed = 51.0 means no connection
 # outdoorhumid = 110 means no connection
 def showDb(db, type)
   start = 0
-  validTypes = ["abspressure", "windspeed", "winddir", "rainfall", "indoortemp", "outdoortemp", "indoorhumid", "outdoorhumid"]
+  validTypes = ["abspressure", "windspeed", "winddir", "rainfall",
+                "indoortemp", "outdoortemp", "indoorhumid", "outdoorhumid"]
   unless validTypes.any? { |x| x == type }
-    puts "#{type} is not a valid datatype. Expected one of #{validTypes.join(", ")}"
+    puts "#{type} is not a valid datatype." +
+      " Expected one of #{validTypes.join(", ")}"
     exit(1)
   end
   count = 0
@@ -113,12 +119,26 @@ def showDb(db, type)
         diff = 0
       end
       previous = current
-      puts "#{values["timestamp"]} #{"%.1f" % diff} #{values["rainfall"]} #{seconds2date(values["timestamp"])}"
+      puts "#{values["timestamp"]} #{"%.1f" % diff}" +
+        " #{values["rainfall"]} #{seconds2date(values["timestamp"])}"
     end
   else
     rows.each do |values|
-      puts "#{values["timestamp"]} #{values[type.to_s]} #{seconds2date(values["timestamp"])}"
+      puts "#{values["timestamp"]} #{values[type.to_s]}" +
+        " #{seconds2date(values["timestamp"])}"
     end
+  end
+end
+
+def editDb(db)
+  db.results_as_hash = true
+  rows = db.execute("SELECT * FROM data ORDER BY timestamp")
+  rows.each do |values|
+    ts = values["timestamp"]
+
+    # Check for timestamp being on the hour
+
+    # Check for stupid years i.e. in the future
   end
 end
     
@@ -215,6 +235,10 @@ opts = OptionParser.new do |opts|
     else
       showDb(db, datatype)
     end
+  end
+  opts.on("-e", "--editdb") do
+    db = dbInit
+    editDb(db)
   end
   opts.on_tail("-h", "--help") do
     puts opts
