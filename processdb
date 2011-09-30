@@ -3,13 +3,15 @@
 require 'sqlite3'
 require 'optparse'
 
-def dbInit()
+def dbInit(filename)
   # Try to setup up the sqlite package
-  if File::exists?("weather.db")
-    db = SQLite3::Database.new("weather.db")
+  if File::exists?(filename)
+    db = SQLite3::Database.new(filename)
   else
-    db = SQLite3::Database.new("weather.db")
-    # timestamp is the Unix date i.e. seconds since 1970-01-01 00:00:00 UTC
+    db = SQLite3::Database.new(filename)
+    # database timestamp uses the Unix date i.e. seconds since
+    # 1970-01-01 00:00:00 UTC whereas heavyweather uses seconds from
+    # 1/1/1900 00:00:00 (GMT)
     db.execute("CREATE TABLE data (timestamp INTEGER PRIMARY KEY, \
                                 abspressure FLOAT, \
                                 windspeed FLOAT, \
@@ -19,51 +21,59 @@ def dbInit()
                                 outdoortemp FLOAT, \
                                 indoorhumid INTEGER, \
                                 outdoorhumid INTEGER, \
-                                origts INTEGER, \
-                                isedited INTEGER)")
+                                origts INTEGER)")
   end
   return db
 end
 
 def addDbEntry(db, tstamp, pres, wspeed, wdir, rain, itemp, otemp,
-               ihumid, ohumid)
+               ihumid, ohumid, origts)
   # See if this timestamp already present, if so, then check if data is
   # identical, give warning about this. If not present just add the entry.
-  timestamp = db.execute("SELECT origts FROM data WHERE origts=" +
-                         tstamp.to_s)
-  if timestamp.empty?
+  db.results_as_hash = false
+  ts = db.execute("SELECT timestamp FROM data WHERE timestamp=#{tstamp}")
+  if ts.empty?
     db.execute("INSERT INTO data VALUES (#{tstamp}, #{pres}, #{wspeed},
                #{wdir}, #{rain}, #{itemp}, #{otemp},
-               #{ihumid}, #{ohumid}, #{tstamp}, 0)")
+               #{ihumid}, #{ohumid}, #{origts})")
+    return 1
   else
     db.results_as_hash = true
-    retVal = db.execute("SELECT * FROM data WHERE origts=#{tstamp}")
-    values = retVal[0] 
+    retVal = db.execute("SELECT * FROM data WHERE timestamp=#{tstamp}")
+    values = retVal[0]
+    diffStr = ""
     if values["abspressure"] != pres.to_f
-      puts "Diff abspressure #{values["abspressure"]} #{pres}"
+      diffStr += "Diff abspressure #{values["abspressure"]} #{pres}\n"
     end
     if values["windspeed"] != wspeed.to_f
-      puts "Diff windspeed #{values["windspeed"]} #{wspeed}"
+      diffStr += "Diff windspeed #{values["windspeed"]} #{wspeed}\n"
     end
     if values["winddir"] != wdir.to_i
-      puts "Diff winddir #{values["winddir"]} #{wdir}"
+      diffStr += "Diff winddir #{values["winddir"]} #{wdir}\n"
     end
     if values["rainfall"] != rain.to_f
-      puts "Diff rainfall #{values["rainfall"]} #{rain.to_f}"
+      diffStr += "Diff rainfall #{values["rainfall"]} #{rain.to_f}\n"
     end
     if values["indoortemp"] != itemp.to_f
-      puts "Diff indoortemp #{values["indoortemp"]} #{itemp}"
+      diffStr += "Diff indoortemp #{values["indoortemp"]} #{itemp}\n"
     end
     if values["outdoortemp"] != otemp.to_f
-      puts "Diff outdoortemp #{values["outdoortemp"]} #{otemp}"
+      diffStr += "Diff outdoortemp #{values["outdoortemp"]} #{otemp}\n"
     end
     if values["indoorhumid"] != ihumid.to_i
-      puts "Diff indoorhumid #{values["indoorhumid"]} #{ihumid}"
+      diffStr += "Diff indoorhumid #{values["indoorhumid"]} #{ihumid}\n"
     end
     if values["outdoorhumid"] != ohumid.to_i
-      puts "Diff outdoorhumid #{values["outdoorhumid"]} #{ohumid}"
+      diffStr += "Diff outdoorhumid #{values["outdoorhumid"]} #{ohumid}\n"
+    end
+    if values["origts"] != origts.to_i
+      diffStr += "Diff origts #{values["origts"]} #{origts}\n"
+    end
+    if diffStr != ""
+      puts "#{seconds2date(tstamp)}: #{diffStr}"
     end
   end
+  return 0
 end
 
 def showDbRanges(db)
@@ -100,7 +110,7 @@ end
 # outdoorhumid = 110 means no connection
 def showDb(db, type)
   start = 0
-  validTypes = ["abspressure", "windspeed", "winddir", "rainfall",
+  validTypes = ["timestamp", "abspressure", "windspeed", "winddir", "rainfall",
                 "indoortemp", "outdoortemp", "indoorhumid", "outdoorhumid"]
   unless validTypes.any? { |x| x == type }
     puts "#{type} is not a valid datatype." +
@@ -130,16 +140,88 @@ def showDb(db, type)
   end
 end
 
+# Return number of changes
 def editDb(db)
+  puts "Editing db"
+  count = 0
+  previousts = 0
+  thisyear = dateyear().to_i
   db.results_as_hash = true
   rows = db.execute("SELECT * FROM data ORDER BY timestamp")
   rows.each do |values|
-    ts = values["timestamp"]
+    tstamp = values["timestamp"]
 
     # Check for timestamp being on the hour
+    date = seconds2ymdhms(tstamp)
+    year = date[0].to_i
+    month = date[1].to_i
+    day = date[2].to_i
+    hour = date[3].to_i
+    min = date[4].to_i
+    sec = date[5].to_i
+    delta = 0
+    if min != 0 || sec != 0
+      if min > 30
+        delta = ((60 - min) * 60) - sec
+      else
+        delta = -((min * 60) + sec)
+      end
+    end
 
-    # Check for stupid years i.e. in the future
+    # Check for stupid years i.e. in the future. Assume that samples
+    # have the correct day/month but just the wrong year.
+    if (year > thisyear)
+      yeardiff = (tstamp - previousts) / (86400 * 365)
+      delta -= yeardiff * 86400 * 365
+    end
+    previousts = tstamp
+    if delta != 0
+      count += 1
+      newtstamp = tstamp + delta
+      previousts = newtstamp
+      puts "#{hour} #{min} #{sec} #{delta} #{tstamp} #{newtstamp}"
+      db.execute("UPDATE data SET timestamp=#{newtstamp}
+                  WHERE origts=#{tstamp}")
+    end
+
+    # Check for stupid years i.e. in the future. Assume that samples are
+    # contiguous. This is not the case with my data.
+#    if (year > thisyear)
+#      delta = previousts + 3600 - tstamp
+#    end
+#    previousts = tstamp
+#    if delta != 0
+#      newtstamp = tstamp + delta
+#      previousts = newtstamp
+#      puts "#{hour} #{min} #{sec} #{delta} #{tstamp} #{newtstamp}"
+#      db.execute("UPDATE data SET timestamp=#{newtstamp}
+#                 WHERE origts=#{tstamp}")
+#    end
   end
+  return count
+end
+
+# Return number of additions
+def combineDb(dstdb, srcdb)
+  puts "Combining db"
+  count = 0
+  srcdb.results_as_hash = true
+  rows = srcdb.execute("SELECT * FROM data ORDER BY timestamp")
+  rows.each do |values|
+    count += addDbEntry(dstdb,
+                        values["timestamp"],
+                        values["abspressure"],
+                        values["windspeed"],
+                        values["winddir"],
+                        values["rainfall"],
+                        values["indoortemp"],
+                        values["outdoortemp"],
+                        values["indoorhumid"],
+                        values["outdoorhumid"],
+                        values["origts"])
+  end
+
+  return count
 end
     
 def timestamp2unix(t)
@@ -150,31 +232,43 @@ def unix2timestamp(t)
   return t + ((70 * 365 + 17) * 86400)
 end
 
+def dateyear()
+  %x{date +"%Y"}.chomp!
+end
+
 def seconds2date(s)
   %x{date -d @#{s.to_s}}.chomp!
 end
-    
+
+def seconds2ymdhms(s)
+  %x{date -d @#{s.to_s} +"%Y-%m-%d-%H-%M-%S"}.chomp!.split(/-/)
+end
+
+# Read the data into a temporary db to allow the data to be tidied up
 def readWeatherFile(db, binfile)
   fp = open(binfile, "rb")
   count = 0
-  
+
   while !fp.eof()
     type = fp.read(4).unpack("L")
     if type[0] == 1
       count = count + 1
       timestamp, pressure, windspeed, winddir, rain, intemp, outtemp,
-        inhumidity, outhumidity = fp.read(32).unpack("LffLfffSS")
+        inhumid, outhumid = fp.read(32).unpack("LffLfffSS")
       # Change timestamp to be unix standard
       timestamp = timestamp2unix(timestamp)
-      addDbEntry(db, timestamp,
+      puts "#{seconds2date(timestamp)} #{"%.1f" % pressure} #{"%.1f" % windspeed} #{winddir} #{"%.1f" % rain} #{"%.1f" % intemp} #{"%.1f" % outtemp} #{inhumid} #{outhumid}"
+      addDbEntry(db,
+                 timestamp,
                  "%.1f" % pressure,
                  "%.1f" % windspeed,
                  winddir,
                  "%.4f" % rain,
                  "%.1f" % intemp,
                  "%.1f" % outtemp,
-                 inhumidity,
-                 outhumidity)
+                 inhumid,
+                 outhumid,
+                 timestamp)
     else
       u1, u2, u3, rows, timestamp1, timestamp2 = fp.read(24).unpack("LLLLLL")
       puts "#{type[0]} #{u1} #{u2} #{u3}"
@@ -183,7 +277,7 @@ def readWeatherFile(db, binfile)
       break
     end
   end
-    
+
   fp.close()
 end
 
@@ -195,7 +289,7 @@ def writeWeatherFile(db, binfile)
   fp = open(binfile, "wb")
   timestamp1 = 0
   timestamp2 = 0
-  
+
   rows = db.execute("SELECT * FROM data")
   rows.each_with_index do |row, idx|
     if idx == 0
@@ -219,26 +313,31 @@ end
 
 opts = OptionParser.new do |opts|
   opts.on("-a", "--add2db DATAFILE") do |datafile|
-    db = dbInit
-    readWeatherFile(db, datafile)
+    # Create tmp db, add new data, edit it and then add to the main db
+    system("rm -f tmp.db")
+    tmpdb = dbInit("tmp.db")
+    readWeatherFile(tmpdb, datafile)
+    showDbRanges(tmpdb)
+    count = editDb(tmpdb)
+    puts "#{count} changes made"
+    showDbRanges(tmpdb)
+    db = dbInit("weather.db")
+    count = combineDb(db, tmpdb)
+    puts "#{count} additions made"
     showDbRanges(db)
   end
   opts.on("-w", "--writedb DATAFILE") do |datafile|
-    db = dbInit
+    db = dbInit("weather.db")
     writeWeatherFile(db, datafile)
     showDbRanges(db)
   end
   opts.on("-s", "--showdb [DATATYPE]") do |datatype|
-    db = dbInit
+    db = dbInit("weather.db")
     if datatype.nil?
       showDbRanges(db)
     else
       showDb(db, datatype)
     end
-  end
-  opts.on("-e", "--editdb") do
-    db = dbInit
-    editDb(db)
   end
   opts.on_tail("-h", "--help") do
     puts opts
