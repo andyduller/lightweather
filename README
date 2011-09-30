@@ -1,0 +1,24 @@
+This is a utility to process a number of data files produced by the
+HeavyWeather software used for a variety of weather station hardware.
+
+It attempts to create an sqlite database representing the data in the files.
+I've had problems with data collection which mean that I have accumulated  a
+number of data files over the years. Some of these have incorrect timestamps
+as the date has been incorrectly set. In some cases the hourly data samples
+have been collected at a few minutes before/past the hour. The software
+attempts to allow you to correct these problems. This cannot always be done
+automatically and you may need to change the script to cope with specific
+problems that you have with datasets.
+
+Command line switches are currently:
+
+-a/--add2db: process a HeavyWeather data file and add data to the weather.db
+  sqlite after processing the data. When data with the same timestamp as
+  one already in the database it checks that the data matches.
+
+-w/--writedb: write the contents of weather.db to a HeavyWeather format data
+  file.
+
+-s/--showdb: show the data ranges contained in weather.db. If a data element
+  name is given on the commandline then the data values will be printed to
+  stdout.
